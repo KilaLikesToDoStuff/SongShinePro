@@ -1,0 +1,324 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>BeepBox Ultra Pro</title>
+  <style>
+    body { font-family: sans-serif; padding: 20px; background: #1e1e1e; color: white; }
+    .grid { display: grid; grid-template-columns: repeat(16, 30px); margin-bottom: 10px; }
+    .note {
+      width: 30px; height: 30px; border: 1px solid #555;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; user-select: none;
+    }
+    .note.active { background-color: #007bff; color: white; }
+    .note.sustain { background-color: #00c853; color: white; }
+    .keyboard { margin-top: 10px; }
+    .key {
+      display: inline-block; width: 30px; height: 60px;
+      border: 1px solid black; background: white; margin-right: 2px;
+      text-align: center; line-height: 60px; cursor: pointer;
+    }
+    textarea { width: 100%; height: 100px; margin-top: 10px; }
+    .instrument-panel { border: 1px solid #444; margin-bottom: 10px; padding: 10px; background: #2c2c2c; }
+    .instrument-header { font-weight: bold; display: flex; justify-content: space-between; }
+    .volume-slider { width: 100px; }
+    .grid-wrap { overflow-x: auto; }
+    button, input[type="file"] {
+      margin-right: 5px;
+    }
+  </style>
+</head>
+<body>
+  <h1>🎼 BeepBox Ultra Pro</h1>
+
+  <div>
+    <label>Add Instrument: <input type="text" id="newInstrumentName" placeholder="e.g. Lead Synth">
+    <button onclick="addInstrument()">➕ Add</button></label>
+    <button onclick="play()">▶️ Play</button>
+    <button onclick="toggleFX()">🎧 FX</button>
+    <button onclick="correctWithAI()">🧠 Correct</button>
+    <button onclick="save()">💾 Save</button>
+    <button onclick="load()">📂 Load</button>
+    <button onclick="exportToText()">📄 Export</button>
+    <button onclick="exportToMIDI()">🎵 MIDI</button>
+    <input type="file" accept=".mid" onchange="importMIDI(event)">
+    <button onclick="toggleMic()">🎤 Mic Input</button>
+  </div>
+
+  <div id="instrumentsContainer"></div>
+
+  <textarea id="exportOutput" placeholder="Exported song will appear here..."></textarea>
+
+  <script>
+const steps = 16;
+    const pitches = 12;
+    let fxEnabled = false;
+    const instruments = {};
+    let instrumentCount = 0;
+
+    function addInstrument() {
+      const name = document.getElementById("newInstrumentName").value.trim();
+      if (!name) return alert("Name required!");
+      if (instruments[name]) return alert("Name must be unique!");
+
+      instruments[name] = {
+        grid: Array.from({ length: pitches }, () => Array(steps).fill(0)),
+        sustain: Array.from({ length: pitches }, () => Array(steps).fill(0)),
+        volume: 1
+      };
+      instrumentCount++;
+      renderInstruments();
+    }
+
+    function renderInstruments() {
+      const container = document.getElementById("instrumentsContainer");
+      container.innerHTML = '';
+      Object.entries(instruments).forEach(([name, data], idx) => {
+        const panel = document.createElement('div');
+        panel.className = 'instrument-panel';
+        const header = document.createElement('div');
+        header.className = 'instrument-header';
+        header.innerHTML = \`\${name} <input type="range" class="volume-slider" min="0" max="1" step="0.01" value="\${data.volume}" onchange="instruments['\${name}'].volume = parseFloat(this.value)">\`;
+        panel.appendChild(header);
+
+        const gridWrap = document.createElement('div');
+        gridWrap.className = 'grid-wrap';
+        const grid = document.createElement('div');
+        grid.className = 'grid';
+        for (let pitch = 0; pitch < pitches; pitch++) {
+          for (let step = 0; step < steps; step++) {
+            const cell = document.createElement('div');
+            cell.className = 'note';
+            if (data.grid[pitch][step]) cell.classList.add('active');
+            if (data.sustain[pitch][step]) cell.classList.add('sustain');
+            cell.onclick = () => {
+              if (data.grid[pitch][step]) {
+                data.grid[pitch][step] = 0;
+                data.sustain[pitch][step] = 0;
+              } else {
+                data.grid[pitch][step] = 1;
+              }
+              renderInstruments();
+            };
+            cell.oncontextmenu = e => {
+              e.preventDefault();
+              if (data.grid[pitch][step]) {
+                data.sustain[pitch][step] = data.sustain[pitch][step] ? 0 : 1;
+                renderInstruments();
+              }
+            };
+            cell.textContent = data.grid[pitch][step] ? (data.sustain[pitch][step] ? '▬' : '♪') : '';
+            grid.appendChild(cell);
+          }
+        }
+        gridWrap.appendChild(grid);
+        panel.appendChild(gridWrap);
+        container.appendChild(panel);
+      });
+    }
+
+    function toggleFX() {
+      fxEnabled = !fxEnabled;
+      alert(fxEnabled ? "FX on" : "FX off");
+    }
+
+    function play() {
+      const bpm = 120;
+      const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      const stepTime = 60 / bpm;
+      Object.entries(instruments).forEach(([name, data]) => {
+        for (let pitch = 0; pitch < pitches; pitch++) {
+          for (let step = 0; step < steps; step++) {
+            if (data.grid[pitch][step]) {
+              const duration = data.sustain[pitch][step] ? stepTime * 2 : stepTime * 0.8;
+              const osc = audioCtx.createOscillator();
+              const gain = audioCtx.createGain();
+              osc.type = 'sine';
+              osc.frequency.value = 220 * Math.pow(2, pitch / 12);
+              gain.gain.value = data.volume;
+              osc.connect(gain);
+              gain.connect(audioCtx.destination);
+              osc.start(audioCtx.currentTime + step * stepTime);
+              osc.stop(audioCtx.currentTime + step * stepTime + duration);
+            }
+          }
+        }
+      });
+    }
+
+    function correctWithAI() {
+      const scale = [0, 2, 4, 5, 7, 9, 11];
+      Object.values(instruments).forEach(inst => {
+        const grid = inst.grid;
+        for (let step = 0; step < steps; step++) {
+          for (let pitch = 0; pitch < pitches; pitch++) {
+            if (grid[pitch][step] && !scale.includes(pitch % 12)) {
+              grid[pitch][step] = 0;
+              inst.sustain[pitch][step] = 0;
+            }
+          }
+        }
+      });
+      renderInstruments();
+    }
+
+    function save() {
+      localStorage.setItem("beepbox_ultra_save", JSON.stringify(instruments));
+      alert("Saved!");
+    }
+
+    function load() {
+      const save = localStorage.getItem("beepbox_ultra_save");
+      if (!save) return alert("No save found");
+      Object.assign(instruments, JSON.parse(save));
+      renderInstruments();
+    }
+
+    function exportToText() {
+      let output = '';
+      for (const [name, data] of Object.entries(instruments)) {
+        output += \`== \${name} ==\n\`;
+        for (let pitch = 0; pitch < pitches; pitch++) {
+          output += data.grid[pitch].map((v, i) => v ? (data.sustain[pitch][i] ? '=' : '1') : '.').join(' ') + '\n';
+        }
+        output += '\n';
+      }
+      document.getElementById("exportOutput").value = output;
+    }
+
+    renderInstruments();
+  </script>
+</body>
+</html>
+
+// === MIC TO GRID ===
+let micStream = null;
+function toggleMic() {
+  if (micStream) {
+    micStream.getTracks().forEach(track => track.stop());
+    micStream = null;
+    alert("Mic stopped.");
+    return;
+  }
+
+  navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+    micStream = stream;
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    const source = audioCtx.createMediaStreamSource(stream);
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 2048;
+    const buffer = new Float32Array(analyser.fftSize);
+    source.connect(analyser);
+
+    function detectPitch() {
+      analyser.getFloatTimeDomainData(buffer);
+      const freq = autoCorrelate(buffer, audioCtx.sampleRate);
+      if (freq > 0) {
+        const midiNote = Math.round(12 * Math.log2(freq / 440) + 69);
+        const pitch = midiNote - 60;
+        if (pitch >= 0 && pitch < pitches) {
+          const step = Math.floor(Math.random() * steps);
+          const firstInst = Object.keys(instruments)[0];
+          instruments[firstInst].grid[pitch][step] = 1;
+          renderInstruments();
+        }
+      }
+      if (micStream) requestAnimationFrame(detectPitch);
+    }
+    detectPitch();
+    alert("Mic listening. Sing!");
+  }).catch(() => alert("Mic access failed."));
+}
+
+function autoCorrelate(buf, rate) {
+  let SIZE = buf.length, best = -1, bestCorr = 0, rms = 0;
+  for (let i = 0; i < SIZE; i++) rms += buf[i] * buf[i];
+  rms = Math.sqrt(rms / SIZE);
+  if (rms < 0.01) return -1;
+  let lastCorr = 1;
+  for (let offset = 1; offset < SIZE; offset++) {
+    let corr = 0;
+    for (let i = 0; i < SIZE - offset; i++) {
+      corr += buf[i] * buf[i + offset];
+    }
+    corr = corr / (SIZE - offset);
+    if (corr > 0.9 && corr > lastCorr) {
+      bestCorr = corr;
+      best = offset;
+    }
+    lastCorr = corr;
+  }
+  return bestCorr > 0.01 ? rate / best : -1;
+}
+
+// === MIDI EXPORT ===
+function exportToMIDI() {
+  const ticksPerBeat = 480;
+  const tempo = Math.floor(60000000 / 120);
+  const header = [77,84,104,100,0,0,0,6,0,1,0,1,(ticksPerBeat>>8)&255,ticksPerBeat&255];
+  const track = [77,84,114,107];
+  let events = [];
+
+  function delta(n) {
+    let out = [];
+    do {
+      let byte = n & 0x7F;
+      n >>= 7;
+      if (n) byte |= 0x80;
+      out.unshift(byte);
+    } while (n);
+    return out;
+  }
+
+  let t = 0;
+  Object.values(instruments).forEach((inst, idx) => {
+    inst.grid.forEach((row, p) => {
+      row.forEach((v, s) => {
+        if (v) {
+          let pitch = 60 + p;
+          events.push([...delta(s * 120), 0x90 | idx, pitch, 100]);
+          events.push([...delta(60), 0x80 | idx, pitch, 0]);
+        }
+      });
+    });
+  });
+
+  events.push([0x00, 0xff, 0x2f, 0x00]); // end
+  let data = events.flat();
+  let size = data.length;
+  const trackHeader = [...track, (size>>24)&255,(size>>16)&255,(size>>8)&255,size&255];
+  const full = new Uint8Array([...header, ...trackHeader, ...data]);
+
+  const blob = new Blob([full], {type: 'audio/midi'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'beepbox.mid';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// === MIDI IMPORT (SIMULATED) ===
+function importMIDI(event) {
+  const reader = new FileReader();
+  reader.onload = () => {
+    const bytes = new Uint8Array(reader.result);
+    const inst = Object.keys(instruments)[0];
+    const grid = instruments[inst].grid;
+    for (let i = 0; i < steps; i++) for (let j = 0; j < pitches; j++) grid[j][i] = 0;
+    for (let i = 0; i < 20; i++) {
+      let step = i % steps;
+      let pitch = Math.floor(Math.random() * pitches);
+      grid[pitch][step] = 1;
+    }
+    renderInstruments();
+    alert("MIDI import simulated with random notes.");
+  };
+  reader.readAsArrayBuffer(event.target.files[0]);
+}
+
+</script>
+</body>
+</html>
